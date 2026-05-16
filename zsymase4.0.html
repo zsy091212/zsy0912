@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>迷宫 · 暗影追逐</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #e2e8f0;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        .game-container {
+            display: flex;
+            gap: 24px;
+            padding: 28px;
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+            max-height: 95vh;
+            overflow: auto;
+        }
+
+        canvas {
+            background: #1e293b;
+            border-radius: 16px;
+            display: block;
+            margin: auto;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 20px;
+            min-width: 180px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        h3 {
+            margin: 0;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+            padding-bottom: 8px;
+        }
+
+        button {
+            padding: 12px 20px;
+            font-size: 15px;
+            font-weight: 600;
+            background: rgba(51, 65, 85, 0.6);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            letter-spacing: 0.3px;
+            backdrop-filter: blur(4px);
+        }
+
+        button:hover {
+            background: rgba(71, 85, 105, 0.8);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0px);
+        }
+
+        button.active {
+            background: linear-gradient(135deg, #e11d48, #be123c);
+            border-color: rgba(225, 29, 72, 0.5);
+            box-shadow: 0 4px 16px rgba(225, 29, 72, 0.3);
+        }
+
+        button.mode-active {
+            background: linear-gradient(135deg, #059669, #047857);
+            border-color: rgba(5, 150, 105, 0.5);
+            box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3);
+        }
+
+        #status {
+            text-align: center;
+            font-weight: 600;
+            font-size: 14px;
+            color: #fbbf24;
+            min-height: 28px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body>
+
+<div class="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="controls">
+        <div class="control-group">
+            <h3>⚙ 设置</h3>
+            <button id="new-game-btn" onclick="init()">⟳ 生成新迷宫</button>
+            <button id="mode-btn" onclick="toggleMode()">当前：单人模式</button>
+        </div>
+        
+        <div class="control-group">
+            <h3>🎯 难度</h3>
+            <button id="easy-btn" onclick="setDifficulty('easy')">简单 (15×15)</button>
+            <button id="medium-btn" class="active" onclick="setDifficulty('medium')">中等 (25×25)</button>
+            <button id="hard-btn" onclick="setDifficulty('hard')">困难 (45×25)</button>
+        </div>
+
+        <div id="status">准备开始</div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    const modeBtn = document.getElementById('mode-btn');
+
+    const difficulties = {
+        easy: { cols: 15, rows: 15, cellSize: 30 },
+        medium: { cols: 25, rows: 25, cellSize: 24 },
+        hard: { cols: 45, rows: 25, cellSize: 22 } 
+    };
+    
+    let currentDifficulty = 'medium';
+    let cellSize = difficulties[currentDifficulty].cellSize;
+    let mapCols = difficulties[currentDifficulty].cols;
+    let mapRows = difficulties[currentDifficulty].rows;
+    
+    let map = [];
+    let isGameOver = false;
+    let gameMode = 'single';
+    let aiInterval = null;
+    let timerInterval = null;
+    let startTime = 0;
+    let elapsedTime = 0;
+    let timerStarted = false;
+
+    const player = { x: 1, y: 1, color: '#3b82f6', size: 16, trail: [] };
+    const player2 = { x: 1, y: 1, color: '#eab308', size: 16, trail: [] };
+    const ai1 = { x: 0, y: 0, color: '#a855f7', size: 16 };
+    const ai2 = { x: 0, y: 0, color: '#ef4444', size: 16 };
+
+    // --- 迷宫生成 ---
+    function generateMaze() {
+        let newMap = Array(mapRows).fill().map(() => Array(mapCols).fill(1));
+        function carve(x, y) {
+            newMap[y][x] = 0;
+            const dirs = [[0, -2], [2, 0], [0, 2], [-2, 0]].sort(() => Math.random() - 0.5);
+            for (let [dx, dy] of dirs) {
+                let nx = x + dx, ny = y + dy;
+                if (nx > 0 && nx < mapCols - 1 && ny > 0 && ny < mapRows - 1 && newMap[ny][nx] === 1) {
+                    newMap[y + dy/2][x + dx/2] = 0;
+                    carve(nx, ny);
+                }
+            }
+        }
+        carve(1, 1);
+        const loopChance = 0.09; 
+        for (let y = 1; y < mapRows - 1; y++) {
+            for (let x = 1; x < mapCols - 1; x++) {
+                if (newMap[y][x] === 1 && Math.random() < loopChance) {
+                    let neighbors = 0;
+                    if (newMap[y-1][x] === 0) neighbors++;
+                    if (newMap[y+1][x] === 0) neighbors++;
+                    if (newMap[y][x-1] === 0) neighbors++;
+                    if (newMap[y][x+1] === 0) neighbors++;
+                    if (neighbors >= 2) newMap[y][x] = 0;
+                }
+            }
+        }
+        return newMap;
+    }
+
+    // --- A* 寻路 ---
+    function getNextMoveAI(startX, startY, targetX, targetY) {
+        let openSet = [];
+        let closedSet = new Set();
+        let cameFrom = new Map();
+        let gScore = new Map();
+        let fScore = new Map();
+        let startKey = `${startX},${startY}`;
+        openSet.push({x: startX, y: startY});
+        gScore.set(startKey, 0);
+        fScore.set(startKey, Math.abs(startX - targetX) + Math.abs(startY - targetY));
+
+        while (openSet.length > 0) {
+            openSet.sort((a, b) => {
+                let keyA = `${a.x},${a.y}`;
+                let keyB = `${b.x},${b.y}`;
+                return fScore.get(keyA) - fScore.get(keyB);
+            });
+            let current = openSet.shift();
+            let currentKey = `${current.x},${current.y}`;
+            if (current.x === targetX && current.y === targetY) {
+                let path = [];
+                let currKey = `${targetX},${targetY}`;
+                while (cameFrom.has(currKey)) {
+                    let [cx, cy] = currKey.split(',').map(Number);
+                    path.unshift({x: cx, y: cy});
+                    currKey = cameFrom.get(currKey);
+                }
+                if (path.length > 0) return path[0];
+                return {x: startX, y: startY};
+            }
+            closedSet.add(currentKey);
+            const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+            for (let [dx, dy] of dirs) {
+                let nx = current.x + dx;
+                let ny = current.y + dy;
+                let neighborKey = `${nx},${ny}`;
+                if (nx >= 0 && nx < mapCols && ny >= 0 && ny < mapRows && map[ny][nx] === 0 && !closedSet.has(neighborKey)) {
+                    let tentativeG = gScore.get(currentKey) + 1;
+                    if (!openSet.some(p => p.x === nx && p.y === ny)) {
+                        openSet.push({x: nx, y: ny});
+                    } else if (tentativeG >= (gScore.get(neighborKey) || Infinity)) {
+                        continue;
+                    }
+                    cameFrom.set(neighborKey, currentKey);
+                    gScore.set(neighborKey, tentativeG);
+                    fScore.set(neighborKey, tentativeG + Math.abs(nx - targetX) + Math.abs(ny - targetY));
+                }
+            }
+        }
+        return {x: startX, y: startY};
+    }
+
+    // --- 游戏逻辑 ---
+    function setDifficulty(level) {
+        currentDifficulty = level;
+        mapCols = difficulties[level].cols;
+        mapRows = difficulties[level].rows;
+        cellSize = difficulties[level].cellSize;
+        canvas.width = mapCols * cellSize;
+        canvas.height = mapRows * cellSize;
+        document.querySelectorAll('.controls button').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`${level}-btn`).classList.add('active');
+        init();
+    }
+
+    function toggleMode() {
+        if (gameMode === 'single') {
+            gameMode = 'ai_chase';
+            modeBtn.innerText = "当前：单 AI 追击";
+        } else if (gameMode === 'ai_chase') {
+            gameMode = 'double_ai';
+            modeBtn.innerText = "当前：双 AI 夹击";
+        } else if (gameMode === 'double_ai') {
+            gameMode = 'two_player';
+            modeBtn.innerText = "当前：双人对战";
+        } else {
+            gameMode = 'single';
+            modeBtn.innerText = "当前：单人模式";
+        }
+        document.querySelectorAll('.controls button').forEach(btn => btn.classList.remove('active'));
+        modeBtn.classList.add('active');
+        init();
+    }
+
+    function startAILoop() {
+        if (aiInterval) clearInterval(aiInterval);
+        if (gameMode === 'single' || gameMode === 'two_player') return;
+        const speed = (currentDifficulty === 'hard') ? 300 : 450;
+        aiInterval = setInterval(() => {
+            if (isGameOver) return;
+            let move1 = getNextMoveAI(ai1.x, ai1.y, player.x, player.y);
+            ai1.x = move1.x;
+            ai1.y = move1.y;
+            if (gameMode === 'double_ai') {
+                let move2 = getNextMoveAI(ai2.x, ai2.y, player.x, player.y);
+                ai2.x = move2.x;
+                ai2.y = move2.y;
+            }
+            checkWin();
+            draw();
+        }, speed);
+    }
+
+    function startTimer() {
+        if (timerStarted) return;
+        timerStarted = true;
+        startTime = Date.now();
+        timerInterval = setInterval(() => {
+            elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+        }, 1000);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (isGameOver) return;
+        const key = e.key.toLowerCase();
+        let moved = false;
+
+        // 玩家1 (WASD)
+        let nextX = player.x;
+        let nextY = player.y;
+        if (key === 'w') nextY--;
+        if (key === 's') nextY++;
+        if (key === 'a') nextX--;
+        if (key === 'd') nextX++;
+
+        if (nextY >= 0 && nextY < mapRows && nextX >= 0 && nextX < mapCols && map[nextY][nextX] === 0) {
+            player.trail.push({x: player.x, y: player.y});
+            if (player.trail.length > 3) player.trail.shift();
+            player.x = nextX;
+            player.y = nextY;
+            moved = true;
+            startTimer();
+        }
+
+        // 玩家2 (方向键)
+        if (gameMode === 'two_player') {
+            nextX = player2.x;
+            nextY = player2.y;
+            if (e.key === 'ArrowUp') nextY--;
+            if (e.key === 'ArrowDown') nextY++;
+            if (e.key === 'ArrowLeft') nextX--;
+            if (e.key === 'ArrowRight') nextX++;
+
+            if (nextY >= 0 && nextY < mapRows && nextX >= 0 && nextX < mapCols && map[nextY][nextX] === 0) {
+                player2.trail.push({x: player2.x, y: player2.y});
+                if (player2.trail.length > 3) player2.trail.shift();
+                player2.x = nextX;
+                player2.y = nextY;
+                moved = true;
+            }
+        }
+
+        if (moved) {
+            checkWin();
+            draw();
+        }
+    });
+
+    function checkWin() {
+        const goalX = mapCols - 2;
+        const goalY = mapRows - 2;
+        
+        if (player.x === goalX && player.y === goalY) {
+            isGameOver = true;
+            if (gameMode === 'double_ai') statusDiv.innerText = `🏆 极限逃脱！用时 ${elapsedTime} 秒！`;
+            else if (gameMode === 'ai_chase') statusDiv.innerText = `🏆 成功逃脱！用时 ${elapsedTime} 秒！`;
+            else if (gameMode === 'two_player') {
+                statusDiv.innerText = `🏆 玩家1 (蓝) 获胜！用时 ${elapsedTime} 秒！`;
+                statusDiv.style.color = player.color;
+                return; 
+            } else statusDiv.innerText = `🏆 恭喜通关！用时 ${elapsedTime} 秒！`;
+            
+            statusDiv.style.color = "#10b981";
+            if(aiInterval) clearInterval(aiInterval);
+            if(timerInterval) clearInterval(timerInterval);
+            return;
+        }
+
+        if (gameMode === 'two_player' && player2.x === goalX && player2.y === goalY) {
+            isGameOver = true;
+            statusDiv.innerText = `🏆 玩家2 (黄) 获胜！用时 ${elapsedTime} 秒！`;
+            statusDiv.style.color = player2.color;
+            if(timerInterval) clearInterval(timerInterval);
+            return;
+        }
+
+        let caught = false;
+        if (gameMode === 'ai_chase' && ai1.x === player.x && ai1.y === player.y) caught = true;
+        if (gameMode === 'double_ai' && (ai1.x === player.x && ai1.y === player.y || ai2.x === player.x && ai2.y === player.y)) caught = true;
+
+        if (caught) {
+            isGameOver = true;
+            statusDiv.innerText = "💀 被 AI 抓住了！";
+            statusDiv.style.color = "#ef4444";
+            if(aiInterval) clearInterval(aiInterval);
+            if(timerInterval) clearInterval(timerInterval);
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // 绘制迷宫墙壁
+        for (let y = 0; y < mapRows; y++) {
+            for (let x = 0; x < mapCols; x++) {
+                if (map[y][x] === 1) {
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                } else {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+        }
+
+        // 绘制终点
+        ctx.fillStyle = '#10b981';
+        const goalX = mapCols - 2;
+        const goalY = mapRows - 2;
+        ctx.fillRect(goalX * cellSize + 4, goalY * cellSize + 4, cellSize - 8, cellSize - 8);
+
+        // 绘制玩家1拖尾 (蓝色)
+        for (let i = 0; i < player.trail.length; i++) {
+            const point = player.trail[i];
+            const alpha = (i + 1) / (player.trail.length + 1);
+            ctx.fillStyle = `rgba(59, 130, 246, ${alpha * 0.35})`;
+            const trailX = point.x * cellSize + (cellSize - player.size) / 2;
+            const trailY = point.y * cellSize + (cellSize - player.size) / 2;
+            ctx.fillRect(trailX, trailY, player.size, player.size);
+        }
+
+        // 绘制玩家2拖尾 (黄色)
+        if (gameMode === 'two_player') {
+            for (let i = 0; i < player2.trail.length; i++) {
+                const point = player2.trail[i];
+                const alpha = (i + 1) / (player2.trail.length + 1);
+                ctx.fillStyle = `rgba(234, 179, 8, ${alpha * 0.35})`;
+                const trailX = point.x * cellSize + (cellSize - player2.size) / 2;
+                const trailY = point.y * cellSize + (cellSize - player2.size) / 2;
+                ctx.fillRect(trailX, trailY, player2.size, player2.size);
+            }
+        }
+
+        // 绘制玩家1
+        ctx.fillStyle = player.color;
+        const pX = player.x * cellSize + (cellSize - player.size) / 2;
+        const pY = player.y * cellSize + (cellSize - player.size) / 2;
+        ctx.fillRect(pX, pY, player.size, player.size);
+
+        // 绘制玩家2
+        if (gameMode === 'two_player') {
+            ctx.fillStyle = player2.color;
+            const p2X = player2.x * cellSize + (cellSize - player2.size) / 2;
+            const p2Y = player2.y * cellSize + (cellSize - player2.size) / 2;
+            ctx.fillRect(p2X, p2Y, player2.size, player2.size);
+        }
+
+        // 绘制AI
+        if (gameMode === 'ai_chase' || gameMode === 'double_ai') {
+            ctx.fillStyle = ai1.color;
+            const ai1X = ai1.x * cellSize + (cellSize - ai1.size) / 2;
+            const ai1Y = ai1.y * cellSize + (cellSize - ai1.size) / 2;
+            ctx.fillRect(ai1X, ai1Y, ai1.size, ai1.size);
+            if (gameMode === 'double_ai') {
+                ctx.fillStyle = ai2.color;
+                const ai2X = ai2.x * cellSize + (cellSize - ai2.size) / 2;
+                const ai2Y = ai2.y * cellSize + (cellSize - ai2.size) / 2;
+                ctx.fillRect(ai2X, ai2Y, ai2.size, ai2.size);
+            }
+        }
+
+        // 绘制左上角计时器
+        ctx.textAlign = 'left';
+        ctx.font = 'bold 20px Arial';
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillText(`⏱ ${elapsedTime} 秒`, 15, 30);
+
+        // 绘制左侧操作说明
+      ctx.font = 'bold 14px Arial';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('操作说明:', 15, 70);
+        ctx.fillStyle = player.color;
+        ctx.fillText('玩家 (蓝): W A S D', 15, 100);
+        if (gameMode === 'two_player') {
+            ctx.fillStyle = player2.color;
+            ctx.fillText('玩家2 (黄): ↑ ↓ ← →', 15, 125);
+        } else if (gameMode === 'ai_chase') {
+            ctx.fillStyle = ai1.color;
+            ctx.fillText('AI (紫): 自动追击', 15, 125);
+        } else if (gameMode === 'double_ai') {
+            ctx.fillStyle = ai1.color;
+            ctx.fillText('AI1 (紫): 追击', 15, 125);
+            ctx.fillStyle = ai2.color;
+            ctx.fillText('AI2 (红): 夹击', 15, 150);
+        }
+
+        // 绘制右下角水印
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.2)';
+        ctx.textAlign = 'right';
+        ctx.font = '12px Arial';
+        ctx.fillText('zsy制作', canvas.width - 10, canvas.height - 10);
+    }
+
+    function init() {
+        map = generateMaze();
+        player.x = 1;
+        player.y = 1;
+        player.trail = [];
+        player2.x = 1;
+        player2.y = 1;
+        player2.trail = [];
+        
+        ai1.x = mapCols - 2;
+        ai1.y = 1;
+        ai2.x = 1;
+        ai2.y = mapRows - 2;
+        
+        isGameOver = false;
+        timerStarted = false;
+        elapsedTime = 0;
+        if(timerInterval) clearInterval(timerInterval);
+        
+        if (gameMode === 'double_ai') {
+            statusDiv.innerText = "腹背受敌！快跑！";
+            statusDiv.style.color = "#ef4444";
+        } else if (gameMode === 'ai_chase') {
+            statusDiv.innerText = "快跑！AI 正在追你！";
+            statusDiv.style.color = "#ef4444";
+        } else if (gameMode === 'two_player') {
+            statusDiv.innerText = "双人竞赛开始！";
+            statusDiv.style.color = "#eab308";
+        } else {
+            statusDiv.innerText = "使用 WASD 移动";
+            statusDiv.style.color = "#fbbf24";
+        }
+        
+        draw();
+        startAILoop();
+    }
+
+    setDifficulty('medium');
+
+</script>
+</body>
+</html>
